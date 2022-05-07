@@ -27,7 +27,7 @@ commons-math3-3.6.1.jar
 ## Project setup
 
 1. Clone the project https://github.com/HarithKK/MRPTA.git
-2. Setup the classpath dependancies
+2. Setup the classpath dependencies
 3. `javac mainRunner.java`
 4. `java mainRunner`
 
