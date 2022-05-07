@@ -4,49 +4,51 @@ import sim.engine.*;
 import sim.display.*;
 import sim.portrayal.continuous.ContinuousPortrayal2D;
 import sim.portrayal.grid.*;
-import test.Tutorial3;
-
 import java.awt.*;
 import javax.swing.*;
 
 public class TaskBotUI extends GUIState {
 
-	private static final long serialVersionUID = 1;
+	private static final double DISPLAY_WIDTH = 400;
+	private static final double DISPLAY_HEIGHT = 400;
 	
 	public Display2D display;
     public JFrame displayFrame;
-    
     ContinuousPortrayal2D continuousPortrayal2D = new ContinuousPortrayal2D();
     SparseGridPortrayal2D dronePortrayal = new SparseGridPortrayal2D();
+    FastValueGridPortrayal2D trailsPortrayal = new FastValueGridPortrayal2D("Trail");
 	
 	public TaskBotUI(SimState state) {
 		super(state);
-		// TODO Auto-generated constructor stub
 	}
 	
+	@Override
+	public void finish() {
+		super.finish();
+	}
 	
 	public void init(Controller c) {
 	    super.init(c);
 	    
-	    // Make the Display2D.  We'll have it display stuff later.
-	    display = new Display2D(400,400,this); // at 400x400, we've got 4x4 per array position
+	    display = new Display2D(DISPLAY_WIDTH,DISPLAY_HEIGHT,this);
+	    
 	    displayFrame = display.createFrame();
-	    c.registerFrame(displayFrame);   // register the frame so it appears in the "Display" list
+	    c.registerFrame(displayFrame);  
 	    displayFrame.setVisible(true);
 	    displayFrame.setTitle(getName());
-	
-	    // specify the backdrop color  -- what gets painted behind the displays
 	    display.setBackdrop(Color.white);
-	    
+	    display.attach(trailsPortrayal,"Trails");
 	    display.attach(continuousPortrayal2D, "Targets");
 	    display.attach(dronePortrayal, "Drones");
-	
+	    
     }
 	
 	public void quit(){
 	    super.quit();
 	    
-	    if (displayFrame!=null) displayFrame.dispose();
+	    if (displayFrame!=null) 
+	    	displayFrame.dispose();
+	    
 	    displayFrame = null;
 	    display = null;
     }
@@ -66,10 +68,12 @@ public class TaskBotUI extends GUIState {
     public void setupPortrayals(){
     
     	continuousPortrayal2D.setField(((TaskPlane)state).targetTasks);
-    	continuousPortrayal2D.setPortrayalForAll(new sim.portrayal.simple.OvalPortrayal2D(Color.blue, 2.0));
-    	
-    	dronePortrayal.setField(((TaskPlane)state).drones);
-    	dronePortrayal.setPortrayalForAll(new sim.portrayal.simple.ImagePortrayal2D(this.getClass(), "drone.png", 4));
+    	trailsPortrayal.setField(((TaskPlane)state).trails);
+    	trailsPortrayal.setMap(
+                new sim.util.gui.SimpleColorMap(
+                    0.0,1.0,Color.white,Color.black));
+    	dronePortrayal.setField(((TaskPlane)state).targetDrones);
+    	dronePortrayal.setPortrayalForAll(new sim.portrayal.simple.ImagePortrayal2D(this.getClass(), "/imgs/drone.png", 8));
 
                
 	    // reschedule the displayer
@@ -77,12 +81,8 @@ public class TaskBotUI extends GUIState {
             
 	    // redraw the display
 	    display.repaint();
+	   
     }
-	
-	public static void main(String []args) {
-		new TaskBotUI(new TaskPlane(System.currentTimeMillis())).createController();
-	}
-	
 }
 
   

@@ -1,108 +1,578 @@
 package TaskBot;
 
+import java.io.PrintStream;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
-import java.util.Collection;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
-import sim.app.particles3d.Particle;
-import sim.engine.Schedule;
+import org.apache.commons.math3.stat.correlation.KendallsCorrelation;
+
+import core.Assessment;
+import core.DroneRobot;
+import core.Location;
+import core.TargetTask;
+import core.TargetTaskList;
+import enums.TargetTypes;
 import sim.engine.SimState;
-import sim.engine.Steppable;
 import sim.field.continuous.Continuous2D;
+import sim.field.grid.DoubleGrid2D;
 import sim.field.grid.SparseGrid2D;
-import sim.util.Double2D;
-import sim.util.Int2D;
+import sim.util.Bag;
+import utils.ChartEva;
+import utils.Common;
+import utils.FileLogger;
+import utils.SortTask;
 
 public class TaskPlane extends SimState {
 	
-	public int areaWidth = 100;
-	public int areaHeight = 100;
-	public int numberOfTargets = 0;
-	public int numberOfRobots = 0;
+	private static final long serialVersionUID = 1;
 	
-	public static final int TARGET_LIMIT = 15;
-	public static final int DRONES_LIMIT = 5;
+	/*
+	 * Configurations
+	 */
+	private static final boolean SHOULD_LOG_IN_FILE = false;
+	private static final boolean SHOW_NUMBER_OF_ITERATION_CHART = false;
 	
+	
+	private static final double MAXIMUM_TARGET_FIELD_COVERAGE_PERCENTAGE = 90.0;
+	private static final boolean VISUALIZE_ROBOTS = false;
+	
+	public static final boolean ARE_ROBOTS_HAVE_SAME_SPEED = true;
+	public static final boolean SHOW_COMPARISON_CHART = true;
+	public static final boolean TRAILS_OFF = false;
+	public static final boolean KEEP_PAST_TRAILS_ON_THE_SIMULATION_WINDOW = false;
+	
+	// Exposed
+	public static final int TASK_PLANE_AREA_WIDTH = 200;
+	public static final int TASK_PLANE_AREA_HEIGHT = 200;
+	private static final int TASK_PLANE_MARGINAL_WIDTH = 10;
+	private static final int TASK_PLANE_MARGINAL_HEIGHT = 30;
+	private static final int PRIORITY_BOUNDARY = 100;
+	private static final boolean SET_RANDOM_TARGET_TYPE = false;
+	
+	private static final int MAXIMUM_DRONE_LIMIT = 50;
+	private static final int MAXIMUM_TARGET_LIMIT = 100;
+	private static final int INCREMENT_TARGET_COUNT = 10;
+	private static final int INCREMENT_DRONE_COUNT = 10;
+	
+	public static int actualTaskPlaneAreaWidth = TASK_PLANE_AREA_WIDTH-TASK_PLANE_MARGINAL_WIDTH;
+	public static int actualTaskPlaneAreaHeight = TASK_PLANE_AREA_HEIGHT-TASK_PLANE_MARGINAL_HEIGHT;
+
+	public int numberOfTargetsTasks = 0;
+	public int numberOfDroneRobots = 0;
+	
+	public static int minTargetLimit = 30;
+	public static int maxTargetLimit = 30;
+	public static int minDroneLimit = 5;
+	public static int maxDroneLimit = 5;
+	
+	private double SAFE_RANGE = 2.0;
+	
+	// settings
+	boolean isPermittedToRunSimulationContineously = false;
+	boolean isPermittedToContineouslyRunSimulationsForAStory = false;
+	
+	public DoubleGrid2D trails;
 	public Continuous2D targetTasks;
-	public SparseGrid2D drones;
+	public SparseGrid2D targetDrones;
+	
+	private List<DroneRobot> drones;
+	
+	public Map<TargetTask, DroneRobot> taskRobotAssignmentMap;
+	
+	public List<Integer> priorityArray = new ArrayList<>();
+	public List<Integer> completedArray = new ArrayList<>();
+	public List<Integer> alreadyFoundTargetsList = new ArrayList<>();
+	
+	long simulationStartTime = 0, simulationEndTime = 0, programmeStartTimeStamp =0;
+	
+	public boolean [][] taskPlaneTaskAssignmentMatrix;
+	int totalNumberOfCompletedTaskCount = 0;
+	int totalNumberOfPossibleTasks =0;
+	int trialNumber = 0;
+	
+	double sumNonModifiedKT =0;
+	double sumKLengthListKT =0;
+	double sumSimulationDurations =0;
+	
+	PrintStream stream = null;
+	private double targetFieldCoverPercentage = 0.0;
 
 	public TaskPlane(long seed) {
 		super(seed);
+		
+		FileLogger.setPrintStreamAsFile(FileLogger.getLogFileName(), SHOULD_LOG_IN_FILE);
+		
+		// initialize program start time
+		programmeStartTimeStamp = System.nanoTime();
 	}
 	
 	public void start() {
 		super.start();
 		
-		targetTasks = new Continuous2D(1.0, areaWidth, areaHeight);
-		drones = new SparseGrid2D(areaWidth, areaHeight);
+		trails = new DoubleGrid2D(TASK_PLANE_AREA_WIDTH, TASK_PLANE_AREA_HEIGHT);
+		targetTasks = new Continuous2D(1.0, TASK_PLANE_AREA_WIDTH, TASK_PLANE_AREA_HEIGHT);
+		targetDrones = new SparseGrid2D(TASK_PLANE_AREA_WIDTH, TASK_PLANE_AREA_HEIGHT);
 		
-		this.generateTasks();
-		this.generateDroneRobots();
+		taskPlaneTaskAssignmentMatrix = new boolean[actualTaskPlaneAreaWidth][actualTaskPlaneAreaHeight];
+		totalNumberOfPossibleTasks = (actualTaskPlaneAreaWidth)*(actualTaskPlaneAreaHeight);
 		
-		System.out.println("-------------------------------------------------------------");
+		this.startTaskSharing();
+	}
+	
+	public void startTaskSharing() {
 		
+		trialNumber += 1;
+		
+		FileLogger.Println("I="+(++trialNumber)+" DR ["+minDroneLimit+"-"+maxDroneLimit+"] TR ["+minTargetLimit+"-"+maxTargetLimit+"] ");
+		
+		try {
+			// initial phase
+			this.generateTasks();
+			this.generateDroneRobots();
+			
+			// first and second stages
+			this.calculateStatusAssessments();
+			
+			// third stage
+			taskRobotAssignmentMap = this.announceEstimates();
+			
+			// fourth stage
+			this.signInContracts();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+	
+	public void evaluateAssessmentErrors() {
+		
+		if(this.checkAllCompleted() == 0) {
+			
+			simulationEndTime = System.nanoTime();
+			
+			double allDistances = 0;
+			int []regressionAnalysis = new int[priorityArray.size()];
+			for(int i=0;i<priorityArray.size();i++) {
+				regressionAnalysis[i] = (int)completedArray.indexOf(priorityArray.get(i));
+				double euclidianDistance = Math.pow((((double)(i))-regressionAnalysis[i]), 2.0);
+				allDistances += euclidianDistance;
+			}
+			double meanIndexError = Math.sqrt(allDistances)/priorityArray.size();
+			
+			if(!isPermittedToRunSimulationContineously && SHOW_COMPARISON_CHART)
+				ChartEva.showChart(regressionAnalysis, numberOfDroneRobots+" Robots Over "+numberOfTargetsTasks+" Tasks ");
+			
+			double[] tmpDoublePriorityArray = priorityArray.stream().mapToDouble(value -> (double)value).toArray();
+			double[] tmpDoubleCompletedArray = completedArray.stream().mapToDouble(value -> (double)value).toArray();
+
+			double KT_1 = new KendallsCorrelation().correlation(tmpDoublePriorityArray, tmpDoubleCompletedArray);
+			double KT_2 = Common.calculateKendallsCorrelation(priorityArray, completedArray);
+			double simulationDuration = (simulationEndTime - simulationStartTime)/1000000;
+			
+			sumNonModifiedKT += KT_1;
+			sumKLengthListKT += KT_2;
+			sumSimulationDurations += simulationDuration;
+			
+			targetFieldCoverPercentage  = ((double)totalNumberOfCompletedTaskCount * 100.0)/(double)totalNumberOfPossibleTasks;
+			
+			printList(priorityArray, "Expected Order Of Tasks: ");
+			printList(completedArray, "Completed Order Of Tasks: ");
+			
+			FileLogger.Println("Simulation Duration= "+ simulationDuration + " ms ");
+			FileLogger.Println("L2 Distance= "+ meanIndexError);
+			
+			FileLogger.Println("KenDalls Tau = "+ KT_1);
+			FileLogger.Println("KenDalls Tau Error (Top K length lists)= "+ KT_2);
+			FileLogger.Println("Mean Simulation Time= "+(sumSimulationDurations/trialNumber) + "S");
+			FileLogger.Println("Target Field Cover Percentage= "+new DecimalFormat("##.##").format(targetFieldCoverPercentage)+"%");
+			
+			if (targetFieldCoverPercentage > MAXIMUM_TARGET_FIELD_COVERAGE_PERCENTAGE) {
+				
+				StringBuilder summeryMessage = new StringBuilder("\n");
+				summeryMessage.append("-------------------------- Summary ----------------------\n");
+				summeryMessage.append("Total Number of Drones: ");
+				summeryMessage.append(drones.size());
+				summeryMessage.append(" ["+minDroneLimit+"-"+maxDroneLimit+"]");
+				summeryMessage.append('\n');
+				summeryMessage.append("Target Tasks Allocation Range For One Simulation: ");
+				summeryMessage.append("["+minTargetLimit+"-"+maxTargetLimit+"]");
+				summeryMessage.append('\n');
+				summeryMessage.append("Total Number of Target Tasks: ");
+				summeryMessage.append(totalNumberOfCompletedTaskCount);
+				summeryMessage.append('\n');
+				summeryMessage.append("Total Number of Trial Simulations: ");
+				summeryMessage.append(trialNumber);
+				summeryMessage.append('\n');
+				
+				summeryMessage.append("Mean KenDalls Tau for "+ trialNumber +" Trials : ");
+				summeryMessage.append(sumNonModifiedKT/trialNumber);
+				summeryMessage.append('\n');
+				
+				summeryMessage.append("Mean KenDalls Tau Error (Top K length lists) for "+ trialNumber +" Trials : ");
+				summeryMessage.append(sumKLengthListKT/trialNumber);
+				summeryMessage.append('\n');
+				
+				summeryMessage.append("Mean Simulation Execution Time for "+ trialNumber +" Trials : ");
+				summeryMessage.append(sumSimulationDurations/trialNumber);
+				summeryMessage.append('\n');
+				
+				if(SHOW_NUMBER_OF_ITERATION_CHART) {
+					ChartEva.showPercentChart(alreadyFoundTargetsList.stream().mapToInt(i->i).toArray(), "Search iterations for finding unassigned locations");
+				}
+				
+				isPermittedToRunSimulationContineously = false;
+				
+				if(isPermittedToContineouslyRunSimulationsForAStory) {
+					reArrangeSimulationField();
+				}
+				
+			}
+			
+			if(isPermittedToRunSimulationContineously) {
+				this.targetDrones.clear();
+				if(!KEEP_PAST_TRAILS_ON_THE_SIMULATION_WINDOW) {
+					this.targetTasks.clear();
+					this.trails.setTo(new DoubleGrid2D(TASK_PLANE_AREA_WIDTH, TASK_PLANE_AREA_HEIGHT));
+				}
+				this.startTaskSharing();
+			}
+		}
+	}
+	
+	private int checkAllCompleted() {
+		int incompleted = 0;
+		for (Object obj : this.targetTasks.allObjects.toArray()) {
+			if(!((TargetTask)obj).isCompleted) {
+				incompleted++;
+			}
+		}
+		return incompleted;
+	}
+	
+	private boolean[] initializeBooleanArray(boolean [] inputArray,int size){
+		
+		if(inputArray != null) {
+			boolean unAssignedRobotFound = false;
+			for (boolean b : inputArray) {
+				if(b == false) {
+					unAssignedRobotFound = true;
+					break;
+				}
+			}
+			
+			if(unAssignedRobotFound) {
+				return inputArray;
+			}
+		}
+		
+		boolean [] tmpArray = new boolean[size];
+		Arrays.fill(tmpArray, false);
+		return tmpArray;
 	}
 
+	private void reArrangeSimulationField() {
+		if(maxDroneLimit < MAXIMUM_DRONE_LIMIT || maxTargetLimit < MAXIMUM_TARGET_LIMIT) {
+			if(maxTargetLimit < MAXIMUM_TARGET_LIMIT) {
+				maxTargetLimit += INCREMENT_TARGET_COUNT;
+				minTargetLimit += INCREMENT_TARGET_COUNT;
+			}else {
+				maxDroneLimit += INCREMENT_DRONE_COUNT;
+				minDroneLimit += INCREMENT_DRONE_COUNT;
+				maxTargetLimit = maxDroneLimit + INCREMENT_TARGET_COUNT;
+				minTargetLimit = maxDroneLimit;
+				
+			}
+			isPermittedToRunSimulationContineously = true;
+		    totalNumberOfCompletedTaskCount = 0;
+			totalNumberOfPossibleTasks =0;
+			trialNumber = 0;
+			
+			sumNonModifiedKT =0;
+			sumKLengthListKT =0;
+			sumSimulationDurations =0;
+			targetFieldCoverPercentage = 0.0;
+			taskPlaneTaskAssignmentMatrix = new boolean[TASK_PLANE_AREA_WIDTH-10][TASK_PLANE_AREA_HEIGHT-30];
+			totalNumberOfPossibleTasks = (TASK_PLANE_AREA_WIDTH-10)*(TASK_PLANE_AREA_HEIGHT-30);
+			
+			FileLogger.setPrintStreamAsFile(FileLogger.getLogFileName(), SHOULD_LOG_IN_FILE);
+			
+			this.start();
+		}else {
+			FileLogger.Println("Simulation Completed");
+			System.out.print("Total duration: "+ ((simulationEndTime = System.nanoTime() - programmeStartTimeStamp)/1000000000) + " S ");
+			this.kill();
+		}
+		
+	}
+	
+	private void signInContracts() {
+		// Award robots
+		
+		drones.forEach(drone -> {
+			drone.addTaskToTargetTaskList(new TargetTask(10001, drone.getLocation().x, drone.getLocation().y, TargetTypes.END, 0));
+			drone.addTaskToTargetTaskList(new TargetTask(10001, drone.getLocation().x, drone.getLocation().y, TargetTypes.END, 0));
+			targetDrones.setObjectLocation(drone, drone.getLocation());
+			schedule.scheduleRepeating(drone);
+		});
+		showDroneAssignments();
+		simulationStartTime = System.nanoTime();
+	}
+
+	private Map<TargetTask, DroneRobot> announceEstimates() throws CloneNotSupportedException {
+		
+		Bag tmpTargetTasks = (Bag) this.targetTasks.getAllObjects().clone();
+		List<DroneRobot> tmpDrones = new ArrayList<>();
+		tmpDrones.addAll(this.drones);
+		
+		boolean []idleRobotMetrix = null;
+		
+		Map<TargetTask, DroneRobot> targetTaskRobotAssignements = new HashMap<>();
+		
+		FileLogger.Println("Assigning Tasks To Robots ----");
+		while(!tmpTargetTasks.isEmpty()) {
+			
+			idleRobotMetrix = initializeBooleanArray(idleRobotMetrix, tmpDrones.size());
+			
+			TargetTask nextTask = (TargetTask)tmpTargetTasks.pop();
+			FileLogger.Println(nextTask.toString());
+			
+			if(nextTask.isCompleted) {
+				continue;
+			}
+			
+			DroneRobot selectedDroneRobot = this.assignRobot(nextTask, tmpDrones, idleRobotMetrix);
+			
+			if(selectedDroneRobot != null) {
+				tmpDrones.get(selectedDroneRobot.getId() -1).addTaskToTargetTaskList(nextTask);
+				targetTaskRobotAssignements.put(nextTask, selectedDroneRobot);
+				idleRobotMetrix[selectedDroneRobot.getId() -1] = true;
+			}
+		}
+		
+		return targetTaskRobotAssignements;
+		
+	}
+	
+	private DroneRobot assignRobot(TargetTask inputTargetTask, List<DroneRobot> inputDronesList, boolean[] inputIdleRobotMetrix) {
+		
+		DroneRobot tempSelectedDroneRobot = null;
+		List<DroneRobot> tmpDroneList= new ArrayList<>();
+		
+		// get Idle robots
+		for (DroneRobot droneRobot : inputDronesList) {
+			if(droneRobot.isIdle()) {
+				tmpDroneList.add(droneRobot);
+			}
+		}
+		
+		if(tmpDroneList.isEmpty()) {
+			tmpDroneList = inputDronesList;
+		}
+		
+		for (DroneRobot tempDroneRobot : inputDronesList) {
+			Assessment tmpAssessment = tempDroneRobot.getTotalAssessmentToNextTarget(inputTargetTask);
+			
+			if(inputIdleRobotMetrix[tempDroneRobot.getId() -1] == true) {
+				continue;
+			}else if(tempSelectedDroneRobot == null && tmpAssessment.isWinBid()) {
+				tempSelectedDroneRobot = tempDroneRobot;
+			} else if(tmpAssessment.isWinBid() && tempSelectedDroneRobot.getTotalAssessmentToNextTarget(inputTargetTask).compare(tmpAssessment)) {
+				tempSelectedDroneRobot = tempDroneRobot;
+			}else {
+				continue;
+			}
+		}
+		
+		return tempSelectedDroneRobot;
+	}
+
+	// Helper functions
+
+	private void calculateStatusAssessments() {
+		
+		ArrayList<TargetTask> targetTaskObjectArray = getTargetTaskArrayFromContinuous2D(this.targetTasks);
+
+		drones.forEach(obj -> {
+			DroneRobot tempDrone = (DroneRobot)obj;
+			tempDrone.calculateStatusAssessments(targetTaskObjectArray);
+		});
+	}
+	
+
+	
 	private void generateDroneRobots() {
-		
-		numberOfRobots = random.nextInt(DRONES_LIMIT)+1;
-		
-		for(int i=0;i< numberOfRobots;i++) {
-			DroneRobot dr = new DroneRobot(50, 90, TargetTypes.TYPE_1, 0, DroneRobot.getRandomSpeed(10,20));
-			drones.setObjectLocation(dr, dr.getLocation());
+		this.drones = new ArrayList<>();
+		numberOfDroneRobots = Common.generateRandom(maxDroneLimit, minDroneLimit);
+
+		FileLogger.Println("Drone Robots ----");
+		for(int index=0;index<numberOfDroneRobots;index++) {
+			this.drones.add(new DroneRobot(
+					index + 1, 
+					new Location(Common.getPositionValue(index, TASK_PLANE_AREA_WIDTH, numberOfDroneRobots, VISUALIZE_ROBOTS ? 10 : 0),
+					TASK_PLANE_AREA_HEIGHT-TASK_PLANE_MARGINAL_HEIGHT), 
+					TargetTypes.getTargetType(SET_RANDOM_TARGET_TYPE), 
+					0, 
+					DroneRobot.getRandomSpeed(1,5))
+			);
+			FileLogger.Println(this.drones.get(index).toString());
 		}
 	}
-
-	private List<TargetTask> fixPrioritoes(List<TargetTask> list, int totalPriorities) {
-		
-		List<TargetTask> taskList = new ArrayList<TargetTask>();
-		
-		for(int i=0;i<list.size();i++) {
-			TargetTask t = list.get(i);
-			t.setPriority(t.getPriority()/totalPriorities);
-			taskList.add(t);
-		}
-		
-		return taskList;
-		
-	}
-
+	
 	private void generateTasks() {
 		
-		numberOfTargets = random.nextInt(TARGET_LIMIT)+1;
+		numberOfTargetsTasks = Common.generateRandom(maxTargetLimit, minTargetLimit);
+		TargetTaskList targetTaskList = generatePossibleTaskList();
 		
-		List<TargetTask> taskList = new ArrayList<TargetTask>();
-		
-		int totalPriorities = 0;
-		
-		for(int i=0; i< numberOfTargets;i++) {
-			int priority = random.nextInt(100);
-			totalPriorities += priority;
-			TargetTask t = new TargetTask(random.nextInt(areaWidth), random.nextInt(areaHeight-20), TargetTypes.TYPE_1, priority);
-			taskList.add(t);
-		}
-		taskList = fixPrioritoes(taskList, totalPriorities);
-		Collections.sort(taskList, new SortTask());
-		
-		double totalPriorityWeight = 0;
-		for(int i=0;i<taskList.size();i++) {
-			TargetTask ts = taskList.get(i);
-			targetTasks.setObjectLocation(ts, ts.getLocationDouble2D());
-			totalPriorityWeight += ts.priority;
-			System.out.println(ts.toString());
+		if(SHOW_NUMBER_OF_ITERATION_CHART) {
+			int maxSelectedTargetIndex = (int)this.targetFieldCoverPercentage;
+			if(alreadyFoundTargetsList.size() != maxSelectedTargetIndex+1) {
+				alreadyFoundTargetsList.add(targetTaskList.getNumberOfTaskLocationsAlreadyInTheTaskPlane());
+			}else {
+				alreadyFoundTargetsList.set(
+						maxSelectedTargetIndex, 
+						( alreadyFoundTargetsList.get(maxSelectedTargetIndex) + targetTaskList.getNumberOfTaskLocationsAlreadyInTheTaskPlane() )
+					);
+			}
 		}
 		
-		System.out.println("Total Priority: "+ new DecimalFormat("###.##").format(totalPriorityWeight));
+		targetTaskList = this.fixPrioritoes(targetTaskList);
+		Collections.sort(targetTaskList.getListOfTasks(), new SortTask());
+		
+		// reset task set arrays
+		this.priorityArray = new ArrayList<>();
+		this.completedArray = new ArrayList<>();
+		
+		for(int targetTaskIndex=targetTaskList.getListOfTasks().size()-1;targetTaskIndex>=0;targetTaskIndex--) {
+			TargetTask targetTask = targetTaskList.getListOfTasks().get(targetTaskIndex);
+			targetTasks.setObjectLocation(targetTask, targetTask.getLocationDouble2D());
+			priorityArray.add(targetTask.id);
+		}
+		Collections.reverse(priorityArray);
+	}
+	
+	// Helper functions
+	
+	
+	private TargetTaskList generatePossibleTaskList() {
+		
+		int targetTaskIndex= 0;
+		int totalPrioryValue = 0;
+		int numberOfTaskLocationsAlreadyInTheTaskPlane = 0;
+		List<TargetTask> tempListOfTasks = new ArrayList<TargetTask>();
+		
+		while(targetTaskIndex< numberOfTargetsTasks) {
+					
+				// local x location and y location
+				Location selectedLocation = new Location(random.nextInt(actualTaskPlaneAreaWidth), random.nextInt(actualTaskPlaneAreaHeight));
+				boolean isSelectedLocationAlreadyInSelectedInTheTaskPlane = this.isLocationAlreadyAssigned(tempListOfTasks, selectedLocation);
+				int taskPriorityValue = 0;
+				TargetTask task = null;
+				
+				if(!isSelectedLocationAlreadyInSelectedInTheTaskPlane) {
+					++totalNumberOfCompletedTaskCount;
+					taskPlaneTaskAssignmentMatrix[selectedLocation.getX_location()][selectedLocation.getY_location()] = true;
+				}
+				
+				if(isSelectedLocationAlreadyInSelectedInTheTaskPlane) {
+					if(SHOW_NUMBER_OF_ITERATION_CHART) {
+						numberOfTaskLocationsAlreadyInTheTaskPlane++;
+					}
+					continue;
+				}
+				
+				taskPriorityValue = Common.generatePriority(PRIORITY_BOUNDARY);
+				totalPrioryValue += taskPriorityValue;
+				
+				task = new TargetTask(
+						(targetTaskIndex + 1),
+						selectedLocation,
+						TargetTypes.getTargetType(SET_RANDOM_TARGET_TYPE),
+						taskPriorityValue
+				);
+				targetTaskIndex++;
+				tempListOfTasks.add(task);
+				
+		}
+		
+		return new TargetTaskList(tempListOfTasks, totalPrioryValue, numberOfTaskLocationsAlreadyInTheTaskPlane);
 		
 	}
 
-	private static final long serialVersionUID = 1;
-	
-	public static void main(String[] args) {
-		doLoop(TaskPlane.class, args);
-		System.exit(0);
+	private boolean isLocationAlreadyAssigned(List<TargetTask> tempListOfTasks, Location l) {
+		// check the location l is within the safe range of another location
+		
+		if(SAFE_RANGE > 0) {
+			for(int targetTaskIndex=0;targetTaskIndex<tempListOfTasks.size();targetTaskIndex++) {
+				if(tempListOfTasks.get(targetTaskIndex).calculateDistance(l.getX_location(), l.getY_location())<SAFE_RANGE) {
+					return true;
+				}
+			}
+		}
+		
+		if(taskPlaneTaskAssignmentMatrix[l.getX_location()][l.getY_location()] == true) {
+			return true;
+		}
+		
+		return false;
 	}
+
+	
+	private TargetTaskList fixPrioritoes(TargetTaskList unfixedTaskList) {
+		
+		TargetTaskList fixedTaskList = new TargetTaskList(new ArrayList<>(), unfixedTaskList.getTotalPrioryValue(), unfixedTaskList.getNumberOfTaskLocationsAlreadyInTheTaskPlane());
+		fixedTaskList.getListOfTasks().removeAll(fixedTaskList.getListOfTasks());
+		
+		for(int i=0;i<unfixedTaskList.getListOfTasks().size();i++) {
+			TargetTask targetTask = unfixedTaskList.getListOfTasks().get(i);
+			targetTask.setPriority((targetTask.getPriority()/unfixedTaskList.getTotalPrioryValue()));
+			fixedTaskList.getListOfTasks().add(targetTask);
+		}
+		
+		return fixedTaskList;
+		
+	}
+	
+	private ArrayList<TargetTask> getTargetTaskArrayFromContinuous2D(Continuous2D continuous2DTaskObject) {
+		ArrayList<TargetTask> tempTargetTaskArray = new ArrayList<>();
+		for (Object obj : this.targetTasks.allObjects.toArray()) {
+			TargetTask tempTargetTask = (TargetTask)obj;
+			if(!tempTargetTask.isCompleted) {
+				tempTargetTaskArray.add(tempTargetTask);
+			}
+		}
+		return tempTargetTaskArray;
+	}
+
+	// end helper functions
+	
+	// Visualization functions
+	
+	private void showDroneAssignments() {
+		for (DroneRobot d : this.drones) {
+			FileLogger.Println(d.getParthPlanAsString());
+		}
+	}
+	
+	private void printList(List<Integer> priorityArray2, String title) {
+		StringBuilder sb = new StringBuilder();
+		sb.append(title);
+		for (int id : priorityArray2) {
+			sb.append(id);
+			sb.append("->");
+		}
+		sb.append("END");
+		FileLogger.Println(sb.toString());
+	}
+	
+	// end VF
+	
+//	public static void main(String[] args) {
+//		doLoop(TaskPlane.class, args);
+//		System.exit(0);
+//	}
 
 }
