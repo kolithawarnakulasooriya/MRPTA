@@ -7,11 +7,13 @@ import java.util.List;
 import java.util.Random;
 
 import TaskBot.TaskPlane;
+import enums.SharingMethods;
 import enums.TargetTypes;
 import sim.app.asteroids.Element;
 import sim.engine.SimState;
 import sim.engine.Steppable;
 import sim.util.Int2D;
+import utils.Common;
 
 public class DroneRobot extends Element implements Steppable {
 
@@ -19,7 +21,7 @@ public class DroneRobot extends Element implements Steppable {
 	private static final double SCALE_COEFFICIENT = 0.02 * 1000 ; // 1 pixel is 1m
 	private static final double FLYING_COST_FOR_ONE_TIME_UNIT = 0.1;
 	private static final double TARGET_TASK_EXECUTION_RANGE = 4.0; 
-	private static final double MAXIMIM_FLYING_COST = 1000000.0; 
+	private static final double MAXIMIM_FLYING_COST = Double.MAX_VALUE; 
 	
 	private int id, x, y, startAngle, speed;
 
@@ -32,8 +34,10 @@ public class DroneRobot extends Element implements Steppable {
 	private int currentTargetTaskindex = 0;
 	private TargetTask nextTask = null;
 	
-	
 	public List<TargetTask> getTaskList() {
+		if(taskList == null) {
+			taskList = new ArrayList<TargetTask>();
+		}
 		return taskList;
 	}
 	
@@ -74,7 +78,7 @@ public class DroneRobot extends Element implements Steppable {
 	
 	public Color getColor() { return Color.green; }
 	
-	public Assessment [][] calculateStatusAssessments(ArrayList<TargetTask> inputTargetTasksList) {
+	public Assessment [][] calculateStatusAssessments(ArrayList<TargetTask> inputTargetTasksList, SharingMethods method) {
 		
 		this.assessmentMetrix = new Assessment[inputTargetTasksList.size()+1][inputTargetTasksList.size()];
 		
@@ -84,7 +88,7 @@ public class DroneRobot extends Element implements Steppable {
 		// calculate assessments from initial location to other task locations
 		for(int j =0;j<inputTargetTasksList.size();j++) {
 			TargetTask robotNextTask = inputTargetTasksList.get(j);
-			this.assessmentMetrix[0][robotNextTask.id-1] = this.calculateAssessment(robotStartingLocation,robotNextTask);
+			this.assessmentMetrix[0][robotNextTask.id-1] = this.calculateAssessment(robotStartingLocation,robotNextTask, method);
 		}
 		
 		// rest of the possible starting locations
@@ -92,23 +96,26 @@ public class DroneRobot extends Element implements Steppable {
 			TargetTask robotTaskStart = inputTargetTasksList.get(i);
 			for(int j =0;j<inputTargetTasksList.size();j++) {
 				TargetTask robotTaskEnd = inputTargetTasksList.get(j);
-				this.assessmentMetrix[robotTaskStart.id][robotTaskEnd.id-1] = this.calculateAssessment(robotTaskStart,robotTaskEnd);
+				this.assessmentMetrix[robotTaskStart.id][robotTaskEnd.id-1] = this.calculateAssessment(robotTaskStart,robotTaskEnd, method);
 			}
 		}
 		
 		return this.assessmentMetrix;
 	}
 	
-	private Assessment calculateAssessment(TargetTask t1, TargetTask t2) {
+	private Assessment calculateAssessment(TargetTask t1, TargetTask t2, SharingMethods method) {
 		
 		if(this.f != t2.f) {
-			return new Assessment(t1, t2, -1, 0, false); 
+			return new Assessment(t1, t2, -1, 0, 0, false); 
 		}
 		
 		double straightLineDistance = Math.sqrt(Math.pow(t2.y - t1.y, 2) + Math.pow(t2.x - t1.x, 2)) * SCALE_COEFFICIENT;
+		if(method == SharingMethods.GÜREL) {
+			straightLineDistance = straightLineDistance / ( 1 + (t2.priority * Common.getGurelControlParameter()));
+		}
 		double timeConstraint = straightLineDistance / (double)this.speed;
 		double energyConsumption = timeConstraint / FLYING_COST_FOR_ONE_TIME_UNIT;
-		return new Assessment(t1, t2, timeConstraint, energyConsumption, true);
+		return new Assessment(t1, t2, timeConstraint, energyConsumption, straightLineDistance, true);
 	}
 
 	public void addTaskToTargetTaskList(TargetTask inputTask) {
@@ -122,6 +129,7 @@ public class DroneRobot extends Element implements Steppable {
 		
 		double sumOfTimeConstraints = 0;
 		double sumOfEnergyConsumption = 0;
+		double sumDistance = 0;
 		
 		int nextTargetTaskId = inputNextTargetTask.id;
 		
@@ -133,6 +141,7 @@ public class DroneRobot extends Element implements Steppable {
 		// initial position to first level location
 		sumOfTimeConstraints += this.assessmentMetrix[0][nextTargetTaskId - 1].getTimeConstraint();
 		sumOfEnergyConsumption += this.assessmentMetrix[0][nextTargetTaskId - 1].getEnergyconsumption();
+		sumDistance += this.assessmentMetrix[0][nextTargetTaskId - 1].getStraightLineDistance();
 		
 		if(!this.isIdle()) {
 			// calculate the total of assigned next targets
@@ -141,6 +150,7 @@ public class DroneRobot extends Element implements Steppable {
 					TargetTask tmpTask = taskList.get(index);
 					sumOfTimeConstraints += this.assessmentMetrix[nextTargetTaskId][ tmpTask.id - 1].getTimeConstraint();
 					sumOfEnergyConsumption += this.assessmentMetrix[nextTargetTaskId][ tmpTask.id - 1].getEnergyconsumption();
+					sumDistance += this.assessmentMetrix[nextTargetTaskId][ tmpTask.id - 1].getStraightLineDistance();
 					
 					nextTargetTaskId = tmpTask.id;
 				}
@@ -149,6 +159,7 @@ public class DroneRobot extends Element implements Steppable {
 			// calculate for new task
 			sumOfTimeConstraints += this.assessmentMetrix[nextTargetTaskId][inputNextTargetTask.id - 1].getTimeConstraint();
 			sumOfEnergyConsumption += this.assessmentMetrix[nextTargetTaskId][inputNextTargetTask.id - 1].getEnergyconsumption();
+			sumDistance += this.assessmentMetrix[nextTargetTaskId][inputNextTargetTask.id - 1].getStraightLineDistance();
 			
 			nextTargetTaskId = inputNextTargetTask.id;
 		}
@@ -156,12 +167,14 @@ public class DroneRobot extends Element implements Steppable {
 		// return trip calculation
 		sumOfTimeConstraints += this.assessmentMetrix[0][nextTargetTaskId - 1].getTimeConstraint();
 		sumOfEnergyConsumption += this.assessmentMetrix[0][nextTargetTaskId - 1].getEnergyconsumption();
+		sumDistance += this.assessmentMetrix[0][nextTargetTaskId - 1].getStraightLineDistance();
 
 		return new Assessment(
 				robotStartingLocation, 
 				inputNextTargetTask, 
 				sumOfTimeConstraints, 
-				sumOfEnergyConsumption, 
+				sumOfEnergyConsumption,
+				sumDistance,
 				sumOfEnergyConsumption <= MAXIMIM_FLYING_COST);
 		
 	}
@@ -201,6 +214,10 @@ public class DroneRobot extends Element implements Steppable {
 
 	public Assessment getAssessment(TargetTask t) {
 		return assessmentMetrix[currentTargetTaskindex][t.id-1];
+	}
+	
+	public Assessment getAssessment(TargetTask t1, TargetTask t2) {
+		return assessmentMetrix[t1.id][t2.id-1];
 	}
 	
 	public void step(SimState state) {
@@ -266,7 +283,7 @@ public class DroneRobot extends Element implements Steppable {
 	    			 tmpTaskPlane.completedArray.add(nextTask.id);
 	    			 ((TargetTask)tmpTaskPlane.targetTasks.allObjects.get(tmpTaskPlane.targetTasks.getObjectIndex(nextTask))).isCompleted = true;
 	    		 }else {
-	    			 tmpTaskPlane.evaluateAssessmentErrors();
+	    			 tmpTaskPlane.evaluateAssessmentErrors(this.id);
 	    		 }
 	    		 
 	    		 nextTask = taskList.remove(0);

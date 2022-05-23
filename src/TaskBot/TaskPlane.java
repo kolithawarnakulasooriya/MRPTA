@@ -10,12 +10,15 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.commons.math3.stat.correlation.KendallsCorrelation;
+import org.apache.commons.math3.stat.correlation.PearsonsCorrelation;
+import org.apache.commons.math3.stat.descriptive.moment.StandardDeviation;
 
 import core.Assessment;
 import core.DroneRobot;
 import core.Location;
 import core.TargetTask;
 import core.TargetTaskList;
+import enums.SharingMethods;
 import enums.TargetTypes;
 import sim.engine.SimState;
 import sim.field.continuous.Continuous2D;
@@ -31,10 +34,12 @@ public class TaskPlane extends SimState {
 	
 	private static final long serialVersionUID = 1;
 	
+	private static final SharingMethods METHOD = SharingMethods.OUR;
+	
 	/*
 	 * Configurations
 	 */
-	private static final boolean SHOULD_LOG_IN_FILE = false;
+	private static final boolean SHOULD_LOG_IN_FILE = true;
 	private static final boolean SHOW_NUMBER_OF_ITERATION_CHART = false;
 	
 	
@@ -42,8 +47,8 @@ public class TaskPlane extends SimState {
 	private static final boolean VISUALIZE_ROBOTS = false;
 	
 	public static final boolean ARE_ROBOTS_HAVE_SAME_SPEED = true;
-	public static final boolean SHOW_COMPARISON_CHART = true;
-	public static final boolean TRAILS_OFF = false;
+	public static final boolean SHOW_COMPARISON_CHART = false;
+	public static final boolean TRAILS_OFF = true;
 	public static final boolean KEEP_PAST_TRAILS_ON_THE_SIMULATION_WINDOW = false;
 	
 	// Exposed
@@ -65,16 +70,16 @@ public class TaskPlane extends SimState {
 	public int numberOfTargetsTasks = 0;
 	public int numberOfDroneRobots = 0;
 	
-	public static int minTargetLimit = 30;
+	public static int minTargetLimit = 20;
 	public static int maxTargetLimit = 30;
-	public static int minDroneLimit = 5;
-	public static int maxDroneLimit = 5;
+	public static int minDroneLimit = 10;
+	public static int maxDroneLimit = 15;
 	
 	private double SAFE_RANGE = 2.0;
 	
 	// settings
-	boolean isPermittedToRunSimulationContineously = false;
-	boolean isPermittedToContineouslyRunSimulationsForAStory = false;
+	boolean isPermittedToRunSimulationContineously = true;
+	boolean isPermittedToContineouslyRunSimulationsForAStory = true;
 	
 	public DoubleGrid2D trails;
 	public Continuous2D targetTasks;
@@ -97,15 +102,20 @@ public class TaskPlane extends SimState {
 	
 	double sumNonModifiedKT =0;
 	double sumKLengthListKT =0;
+	double sumPearsonssCorrelations =0;
 	double sumSimulationDurations =0;
+	double sumStdValues =0;
 	
 	PrintStream stream = null;
+	
+	DecimalFormat df = new DecimalFormat("##.00");
+	
 	private double targetFieldCoverPercentage = 0.0;
 
 	public TaskPlane(long seed) {
 		super(seed);
 		
-		FileLogger.setPrintStreamAsFile(FileLogger.getLogFileName(), SHOULD_LOG_IN_FILE);
+		FileLogger.setPrintStreamAsFile(FileLogger.getLogFileName(this.METHOD.name()), SHOULD_LOG_IN_FILE);
 		
 		// initialize program start time
 		programmeStartTimeStamp = System.nanoTime();
@@ -128,7 +138,7 @@ public class TaskPlane extends SimState {
 		
 		trialNumber += 1;
 		
-		FileLogger.Println("I="+(++trialNumber)+" DR ["+minDroneLimit+"-"+maxDroneLimit+"] TR ["+minTargetLimit+"-"+maxTargetLimit+"] ");
+		FileLogger.println("I="+(++trialNumber)+" DR ["+minDroneLimit+"-"+maxDroneLimit+"] TR ["+minTargetLimit+"-"+maxTargetLimit+"] ");
 		
 		try {
 			// initial phase
@@ -148,9 +158,8 @@ public class TaskPlane extends SimState {
 		}
 	}
 	
-	public void evaluateAssessmentErrors() {
-		
-		if(this.checkAllCompleted() == 0) {
+	public void evaluateAssessmentErrors(int id) {
+		if(this.checkAllCompleted() == 0 && isAllDroneReachedToEndLocations(id)) {
 			
 			simulationEndTime = System.nanoTime();
 			
@@ -169,26 +178,33 @@ public class TaskPlane extends SimState {
 			double[] tmpDoublePriorityArray = priorityArray.stream().mapToDouble(value -> (double)value).toArray();
 			double[] tmpDoubleCompletedArray = completedArray.stream().mapToDouble(value -> (double)value).toArray();
 
-			double KT_1 = new KendallsCorrelation().correlation(tmpDoublePriorityArray, tmpDoubleCompletedArray);
-			double KT_2 = Common.calculateKendallsCorrelation(priorityArray, completedArray);
+			double KT_1 = Math.abs(new KendallsCorrelation().correlation(tmpDoublePriorityArray, tmpDoubleCompletedArray));
+			
+			double topK = maxTargetLimit * 0.6 ;
+			double KT_2 = Common.calculateKendallsCorrelation(priorityArray, completedArray, topK);
+			double PC_1 = Math.abs(new PearsonsCorrelation().correlation(tmpDoublePriorityArray, tmpDoubleCompletedArray));
 			double simulationDuration = (simulationEndTime - simulationStartTime)/1000000;
 			
 			sumNonModifiedKT += KT_1;
 			sumKLengthListKT += KT_2;
+			sumPearsonssCorrelations += PC_1;
 			sumSimulationDurations += simulationDuration;
 			
 			targetFieldCoverPercentage  = ((double)totalNumberOfCompletedTaskCount * 100.0)/(double)totalNumberOfPossibleTasks;
 			
+			FileLogger.println("----------- Trial ("+trialNumber+") ------------");
+			
 			printList(priorityArray, "Expected Order Of Tasks: ");
 			printList(completedArray, "Completed Order Of Tasks: ");
 			
-			FileLogger.Println("Simulation Duration= "+ simulationDuration + " ms ");
-			FileLogger.Println("L2 Distance= "+ meanIndexError);
+			FileLogger.println("Simulation Duration= "+ simulationDuration + " ms ");
+			FileLogger.println("L2 Distance= "+ meanIndexError);
 			
-			FileLogger.Println("KenDalls Tau = "+ KT_1);
-			FileLogger.Println("KenDalls Tau Error (Top K length lists)= "+ KT_2);
-			FileLogger.Println("Mean Simulation Time= "+(sumSimulationDurations/trialNumber) + "S");
-			FileLogger.Println("Target Field Cover Percentage= "+new DecimalFormat("##.##").format(targetFieldCoverPercentage)+"%");
+			FileLogger.println("KenDalls Tau = "+ df.format(KT_1));
+			FileLogger.println("KenDalls Tau Error (Top K length lists)= "+ df.format(KT_2));
+			FileLogger.println("Pearson's Correlation= "+ df.format(PC_1));
+			FileLogger.println("Mean Simulation Time= "+(sumSimulationDurations/trialNumber) + "S");
+			FileLogger.println("Target Field Cover Percentage= "+new DecimalFormat("##.##").format(targetFieldCoverPercentage)+"%");
 			
 			if (targetFieldCoverPercentage > MAXIMUM_TARGET_FIELD_COVERAGE_PERCENTAGE) {
 				
@@ -216,8 +232,16 @@ public class TaskPlane extends SimState {
 				summeryMessage.append(sumKLengthListKT/trialNumber);
 				summeryMessage.append('\n');
 				
+				summeryMessage.append("Mean Pearson's correlation for "+ trialNumber +" Trials : ");
+				summeryMessage.append(sumPearsonssCorrelations/trialNumber);
+				summeryMessage.append('\n');
+				
 				summeryMessage.append("Mean Simulation Execution Time for "+ trialNumber +" Trials : ");
 				summeryMessage.append(sumSimulationDurations/trialNumber);
+				summeryMessage.append('\n');
+				
+				summeryMessage.append("Mean STD for "+ trialNumber +" Trials : ");
+				summeryMessage.append(sumStdValues/trialNumber);
 				summeryMessage.append('\n');
 				
 				if(SHOW_NUMBER_OF_ITERATION_CHART) {
@@ -251,6 +275,15 @@ public class TaskPlane extends SimState {
 			}
 		}
 		return incompleted;
+	}
+	
+	private boolean isAllDroneReachedToEndLocations(int id) {
+		for(DroneRobot dr : drones) {
+			if(dr.getId() != id && dr.getTaskList().size() > 0) {
+				return false;
+			}
+		}
+		return true;
 	}
 	
 	private boolean[] initializeBooleanArray(boolean [] inputArray,int size){
@@ -294,15 +327,17 @@ public class TaskPlane extends SimState {
 			sumNonModifiedKT =0;
 			sumKLengthListKT =0;
 			sumSimulationDurations =0;
+			sumPearsonssCorrelations =0;
 			targetFieldCoverPercentage = 0.0;
+			sumStdValues=0.0;
 			taskPlaneTaskAssignmentMatrix = new boolean[TASK_PLANE_AREA_WIDTH-10][TASK_PLANE_AREA_HEIGHT-30];
 			totalNumberOfPossibleTasks = (TASK_PLANE_AREA_WIDTH-10)*(TASK_PLANE_AREA_HEIGHT-30);
 			
-			FileLogger.setPrintStreamAsFile(FileLogger.getLogFileName(), SHOULD_LOG_IN_FILE);
+			FileLogger.setPrintStreamAsFile(FileLogger.getLogFileName(this.METHOD.name()), SHOULD_LOG_IN_FILE);
 			
 			this.start();
 		}else {
-			FileLogger.Println("Simulation Completed");
+			FileLogger.println("Simulation Completed");
 			System.out.print("Total duration: "+ ((simulationEndTime = System.nanoTime() - programmeStartTimeStamp)/1000000000) + " S ");
 			this.kill();
 		}
@@ -311,7 +346,6 @@ public class TaskPlane extends SimState {
 	
 	private void signInContracts() {
 		// Award robots
-		
 		drones.forEach(drone -> {
 			drone.addTaskToTargetTaskList(new TargetTask(10001, drone.getLocation().x, drone.getLocation().y, TargetTypes.END, 0));
 			drone.addTaskToTargetTaskList(new TargetTask(10001, drone.getLocation().x, drone.getLocation().y, TargetTypes.END, 0));
@@ -321,8 +355,20 @@ public class TaskPlane extends SimState {
 		showDroneAssignments();
 		simulationStartTime = System.nanoTime();
 	}
+	
+	private Map<TargetTask, DroneRobot> announceEstimates() throws CloneNotSupportedException{
+		if(METHOD == SharingMethods.GÜREL) {
+			return announceEstimatesGurelsMethod();
+		} 
+		else if(METHOD == SharingMethods.OUR_NP) {
+			return announceEstimatesOurMethodWithoutIdle();
+		} 
+		else {
+			return announceEstimatesOurMethod();
+		}
+	}
 
-	private Map<TargetTask, DroneRobot> announceEstimates() throws CloneNotSupportedException {
+	private Map<TargetTask, DroneRobot> announceEstimatesOurMethod() throws CloneNotSupportedException {
 		
 		Bag tmpTargetTasks = (Bag) this.targetTasks.getAllObjects().clone();
 		List<DroneRobot> tmpDrones = new ArrayList<>();
@@ -332,13 +378,13 @@ public class TaskPlane extends SimState {
 		
 		Map<TargetTask, DroneRobot> targetTaskRobotAssignements = new HashMap<>();
 		
-		FileLogger.Println("Assigning Tasks To Robots ----");
+		FileLogger.println("Assigning Tasks To Robots ----");
 		while(!tmpTargetTasks.isEmpty()) {
 			
 			idleRobotMetrix = initializeBooleanArray(idleRobotMetrix, tmpDrones.size());
 			
 			TargetTask nextTask = (TargetTask)tmpTargetTasks.pop();
-			FileLogger.Println(nextTask.toString());
+			FileLogger.println(nextTask.toString());
 			
 			if(nextTask.isCompleted) {
 				continue;
@@ -356,6 +402,105 @@ public class TaskPlane extends SimState {
 		return targetTaskRobotAssignements;
 		
 	}
+	
+	private Map<TargetTask, DroneRobot> announceEstimatesOurMethodWithoutIdle() throws CloneNotSupportedException {
+		
+		Bag tmpTargetTasks = (Bag) this.targetTasks.getAllObjects().clone();
+		List<DroneRobot> tmpDrones = new ArrayList<>();
+		tmpDrones.addAll(this.drones);
+		
+		Map<TargetTask, DroneRobot> targetTaskRobotAssignements = new HashMap<>();
+		
+		FileLogger.println("Assigning Tasks To Robots ----");
+		while(!tmpTargetTasks.isEmpty()) {
+			
+			TargetTask nextTask = (TargetTask)tmpTargetTasks.pop();
+			FileLogger.println(nextTask.toString());
+			
+			if(nextTask.isCompleted) {
+				continue;
+			}
+			
+			Assessment minimumModifiedAssessment = null;
+			DroneRobot selectedDrone = null;
+			
+			for(int i=0;i< tmpDrones.size(); i++) {
+				DroneRobot tempSelectedDroneRobot = tmpDrones.get(i);
+				Assessment tmpAssessment = tempSelectedDroneRobot.getTotalAssessmentToNextTarget(nextTask);
+				
+				// get lowest DSP value with assigned robot
+				if(minimumModifiedAssessment == null && tmpAssessment.isWinBid() ) {
+					minimumModifiedAssessment = tmpAssessment;
+					selectedDrone = tempSelectedDroneRobot;
+				} else if(tmpAssessment.isWinBid() && tempSelectedDroneRobot.getTotalAssessmentToNextTarget(nextTask).compare(tmpAssessment)){
+					minimumModifiedAssessment = tmpAssessment;
+					selectedDrone = tempSelectedDroneRobot;
+				}else {
+					continue;
+				}
+			}
+			
+			if(selectedDrone != null) {
+				tmpDrones.get(selectedDrone.getId() -1).addTaskToTargetTaskList(nextTask);
+				targetTaskRobotAssignements.put(nextTask, selectedDrone);
+			}
+		}
+		
+		return targetTaskRobotAssignements;
+		
+	}
+	
+	private Map<TargetTask, DroneRobot> announceEstimatesGurelsMethod() throws CloneNotSupportedException {
+		
+		Bag tmpTargetTasks = (Bag) this.targetTasks.getAllObjects().clone();
+		List<DroneRobot> tmpDrones = new ArrayList<>();
+		tmpDrones.addAll(this.drones);
+		
+		Map<TargetTask, DroneRobot> targetTaskRobotAssignements = new HashMap<>();
+		
+		FileLogger.println("Assigning Tasks To Robots ----");
+
+		// step 1
+		// Set mobile robot current node as the starting node
+		// current starting node for all drones are set as initial nodes
+
+		while(!tmpTargetTasks.isEmpty()) {
+			
+			// select lowest modified Modified DSPLength for each drone
+			double minimumModifiedDSPLength = Double.MAX_VALUE;
+			TargetTask nextTask = (TargetTask)tmpTargetTasks.pop();
+			DroneRobot selectedDrone = null;
+			
+			for(int i=0;i< tmpDrones.size(); i++) {
+				DroneRobot selectedTempDrone = tmpDrones.get(i);
+				
+				// here we do not check the availability of the drones, we just share tasks. because mobile robots are mostly contains enough power
+				TargetTask startTask = null;
+				if(selectedTempDrone.getTaskList().size() >0 ) {
+					startTask= selectedTempDrone.getTaskList().get(0);
+				}else {
+					startTask = new TargetTask(0, selectedTempDrone.getLocation().getX(), selectedTempDrone.getLocation().getY(), TargetTypes.INIT, 0);
+				}
+				
+				Assessment as = selectedTempDrone.getAssessment(startTask, nextTask);
+				
+				// get lowest DSP value with assigned robot
+				if(as.getStraightLineDistance() < minimumModifiedDSPLength) {
+					minimumModifiedDSPLength = as.getStraightLineDistance();
+					selectedDrone = selectedTempDrone;
+				}
+			}
+			
+			if(selectedDrone != null) {
+				tmpDrones.get(selectedDrone.getId() -1).addTaskToTargetTaskList(nextTask);
+				targetTaskRobotAssignements.put(nextTask, selectedDrone);
+			}
+		}
+		
+		return targetTaskRobotAssignements;
+		
+	}
+	
 	
 	private DroneRobot assignRobot(TargetTask inputTargetTask, List<DroneRobot> inputDronesList, boolean[] inputIdleRobotMetrix) {
 		
@@ -398,17 +543,16 @@ public class TaskPlane extends SimState {
 
 		drones.forEach(obj -> {
 			DroneRobot tempDrone = (DroneRobot)obj;
-			tempDrone.calculateStatusAssessments(targetTaskObjectArray);
+			tempDrone.calculateStatusAssessments(targetTaskObjectArray, METHOD);
 		});
 	}
-	
 
 	
 	private void generateDroneRobots() {
 		this.drones = new ArrayList<>();
 		numberOfDroneRobots = Common.generateRandom(maxDroneLimit, minDroneLimit);
 
-		FileLogger.Println("Drone Robots ----");
+		FileLogger.println("Drone Robots ----");
 		for(int index=0;index<numberOfDroneRobots;index++) {
 			this.drones.add(new DroneRobot(
 					index + 1, 
@@ -418,7 +562,7 @@ public class TaskPlane extends SimState {
 					0, 
 					DroneRobot.getRandomSpeed(1,5))
 			);
-			FileLogger.Println(this.drones.get(index).toString());
+			FileLogger.println(this.drones.get(index).toString());
 		}
 	}
 	
@@ -484,7 +628,7 @@ public class TaskPlane extends SimState {
 					continue;
 				}
 				
-				taskPriorityValue = Common.generatePriority(PRIORITY_BOUNDARY);
+				taskPriorityValue = Common.generatePriority(PRIORITY_BOUNDARY, METHOD);
 				totalPrioryValue += taskPriorityValue;
 				
 				task = new TargetTask(
@@ -528,7 +672,12 @@ public class TaskPlane extends SimState {
 		
 		for(int i=0;i<unfixedTaskList.getListOfTasks().size();i++) {
 			TargetTask targetTask = unfixedTaskList.getListOfTasks().get(i);
-			targetTask.setPriority((targetTask.getPriority()/unfixedTaskList.getTotalPrioryValue()));
+			
+			if(METHOD == SharingMethods.GÜREL) {
+				targetTask.setPriority((targetTask.getPriority()));
+			}else {
+				targetTask.setPriority((targetTask.getPriority()/unfixedTaskList.getTotalPrioryValue()));
+			}
 			fixedTaskList.getListOfTasks().add(targetTask);
 		}
 		
@@ -553,8 +702,19 @@ public class TaskPlane extends SimState {
 	
 	private void showDroneAssignments() {
 		for (DroneRobot d : this.drones) {
-			FileLogger.Println(d.getParthPlanAsString());
+			FileLogger.println(d.getParthPlanAsString());
 		}
+		// task distribution should be uniform distribution
+		
+		double[] distributionData = new double[this.drones.size()];
+		
+		for(int i=0;i< this.drones.size() ;i++) {
+			distributionData[i] = this.drones.get(i).getTaskList().size();
+		}
+		double std = new StandardDeviation().evaluate(distributionData);
+		FileLogger.println("Task Distibutiorn [x= robot id][y = task count] : "+Arrays.toString(distributionData));
+		FileLogger.println("Task Distribution SDT = "+ std);
+		sumStdValues += std;
 	}
 	
 	private void printList(List<Integer> priorityArray2, String title) {
@@ -562,10 +722,10 @@ public class TaskPlane extends SimState {
 		sb.append(title);
 		for (int id : priorityArray2) {
 			sb.append(id);
-			sb.append("->");
+			sb.append(",");
 		}
 		sb.append("END");
-		FileLogger.Println(sb.toString());
+		FileLogger.println(sb.toString());
 	}
 	
 	// end VF

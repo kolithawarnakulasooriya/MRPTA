@@ -2,7 +2,7 @@ package core;
 
 public class Assessment {
 	private TargetTask sourceTarget, destinationTarget;
-	private double timeConstraint, energyconsumption;
+	private double timeConstraint, energyconsumption, straightLineDistance;
 	private boolean winBid;
 	public TargetTask getSourceTarget() {
 		return sourceTarget;
@@ -20,17 +20,22 @@ public class Assessment {
 		return energyconsumption;
 	}
 
+	public double getStraightLineDistance() {
+		return straightLineDistance;
+	}
+
 	public boolean isWinBid() {
 		return winBid;
 	}
 	
-	public Assessment(TargetTask sourceTarget, TargetTask destTarget, double timeConstraint, double energyconsumption, boolean winBid) {
+	public Assessment(TargetTask sourceTarget, TargetTask destTarget, double timeConstraint, double energyconsumption, double straightLineDistance, boolean winBid) {
 		super();
 		this.sourceTarget = sourceTarget;
 		this.destinationTarget = destTarget;
 		this.timeConstraint = timeConstraint;
 		this.winBid = winBid;
 		this.energyconsumption = energyconsumption;
+		this.straightLineDistance = straightLineDistance;
 	}
 	
 	public boolean compare(Assessment a) {
