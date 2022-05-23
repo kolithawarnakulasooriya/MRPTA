@@ -34,7 +34,7 @@ public class TaskBotUI extends GUIState {
 	    
 	    displayFrame = display.createFrame();
 	    c.registerFrame(displayFrame);  
-	    displayFrame.setVisible(true);
+	   // displayFrame.setVisible(true);
 	    displayFrame.setTitle(getName());
 	    display.setBackdrop(Color.white);
 	    display.attach(trailsPortrayal,"Trails");

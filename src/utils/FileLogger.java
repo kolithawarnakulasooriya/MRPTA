@@ -7,6 +7,8 @@ import java.util.Date;
 
 public class FileLogger {
 	
+	private final static String directoryName = "LOGS-" + new Date().toLocaleString();
+	
 	public static PrintStream setPrintStreamAsFile(String filename, boolean shouldLogInFile) {
 		if(!shouldLogInFile)
 			return null;
@@ -23,12 +25,16 @@ public class FileLogger {
 		}
 	}
 	
-	public static void Println(String text) {
+	public static void println(String text) {
 		System.out.println(text);
 	}
 	
 	@SuppressWarnings("deprecation")
-	public static String getLogFileName() {
-		return "log"+new Date().toLocaleString()+".txt";
+	public static String getLogFileName(String method) {
+		File dir = new File(directoryName);
+		if(!dir.exists()) {
+			dir.mkdir();
+		}
+		return directoryName + "/"+method+"-log-"+new Date().toLocaleString()+".txt";
 	}
 }
