@@ -179,6 +179,54 @@ public class DroneRobot extends Element implements Steppable {
 		
 	}
 	
+	public Assessment getTotalAssessmentWithoutReturnTrip(TargetTask inputNextTargetTask) {
+		
+		double sumOfTimeConstraints = 0;
+		double sumOfEnergyConsumption = 0;
+		double sumDistance = 0;
+		
+		int nextTargetTaskId = inputNextTargetTask.id;
+		
+		if(!this.isIdle()) {
+			nextTargetTaskId = this.taskList.get(0).id;
+		}
+		
+		// initial position to first level location
+		sumOfTimeConstraints += this.assessmentMetrix[0][nextTargetTaskId - 1].getTimeConstraint();
+		sumOfEnergyConsumption += this.assessmentMetrix[0][nextTargetTaskId - 1].getEnergyconsumption();
+		sumDistance += this.assessmentMetrix[0][nextTargetTaskId - 1].getStraightLineDistance();
+		
+		if(!this.isIdle()) {
+			// calculate the total of assigned next targets
+			if(this.taskList.size()>1) {
+				for(int index =1; index< taskList.size(); index++) {
+					TargetTask tmpTask = taskList.get(index);
+					sumOfTimeConstraints += this.assessmentMetrix[nextTargetTaskId][ tmpTask.id - 1].getTimeConstraint();
+					sumOfEnergyConsumption += this.assessmentMetrix[nextTargetTaskId][ tmpTask.id - 1].getEnergyconsumption();
+					sumDistance += this.assessmentMetrix[nextTargetTaskId][ tmpTask.id - 1].getStraightLineDistance();
+					
+					nextTargetTaskId = tmpTask.id;
+				}
+			}
+			
+			// calculate for new task
+			sumOfTimeConstraints += this.assessmentMetrix[nextTargetTaskId][inputNextTargetTask.id - 1].getTimeConstraint();
+			sumOfEnergyConsumption += this.assessmentMetrix[nextTargetTaskId][inputNextTargetTask.id - 1].getEnergyconsumption();
+			sumDistance += this.assessmentMetrix[nextTargetTaskId][inputNextTargetTask.id - 1].getStraightLineDistance();
+			
+			nextTargetTaskId = inputNextTargetTask.id;
+			
+		}
+		return new Assessment(
+				robotStartingLocation, 
+				inputNextTargetTask, 
+				sumOfTimeConstraints, 
+				sumOfEnergyConsumption,
+				sumDistance,
+				sumOfEnergyConsumption <= MAXIMIM_FLYING_COST);
+		
+	}
+	
 	public String toString() {
 		return "id: "+ this.id +
 				" x: "+ this.x +

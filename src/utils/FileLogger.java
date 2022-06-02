@@ -7,7 +7,8 @@ import java.util.Date;
 
 public class FileLogger {
 	
-	private final static String directoryName = "LOGS-" + new Date().toLocaleString();
+	private final static String directoryName = "Logs";
+	public static boolean summaryOnly = false;
 	
 	public static PrintStream setPrintStreamAsFile(String filename, boolean shouldLogInFile) {
 		if(!shouldLogInFile)
@@ -26,6 +27,11 @@ public class FileLogger {
 	}
 	
 	public static void println(String text) {
+		if(!summaryOnly)
+			System.out.println(text);
+	}
+	
+	public static void printlnSum(String text) {
 		System.out.println(text);
 	}
 	

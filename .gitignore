@@ -1,5 +1,4 @@
 .settings
-/bin
+bin/**
 .vscode
 /LOGS**
-**/.DS_Store

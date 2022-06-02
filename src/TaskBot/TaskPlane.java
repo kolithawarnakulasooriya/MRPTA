@@ -34,7 +34,7 @@ public class TaskPlane extends SimState {
 	
 	private static final long serialVersionUID = 1;
 	
-	private static final SharingMethods METHOD = SharingMethods.OUR;
+	private static final SharingMethods METHOD = SharingMethods.GÜREL;
 	
 	/*
 	 * Configurations
@@ -43,7 +43,7 @@ public class TaskPlane extends SimState {
 	private static final boolean SHOW_NUMBER_OF_ITERATION_CHART = false;
 	
 	
-	private static final double MAXIMUM_TARGET_FIELD_COVERAGE_PERCENTAGE = 90.0;
+	private static final double MAXIMUM_TARGET_FIELD_COVERAGE_PERCENTAGE = 15.0;
 	private static final boolean VISUALIZE_ROBOTS = false;
 	
 	public static final boolean ARE_ROBOTS_HAVE_SAME_SPEED = true;
@@ -52,8 +52,8 @@ public class TaskPlane extends SimState {
 	public static final boolean KEEP_PAST_TRAILS_ON_THE_SIMULATION_WINDOW = false;
 	
 	// Exposed
-	public static final int TASK_PLANE_AREA_WIDTH = 200;
-	public static final int TASK_PLANE_AREA_HEIGHT = 200;
+	public static final int TASK_PLANE_AREA_WIDTH = 400;
+	public static final int TASK_PLANE_AREA_HEIGHT = 400;
 	private static final int TASK_PLANE_MARGINAL_WIDTH = 10;
 	private static final int TASK_PLANE_MARGINAL_HEIGHT = 30;
 	private static final int PRIORITY_BOUNDARY = 100;
@@ -70,10 +70,13 @@ public class TaskPlane extends SimState {
 	public int numberOfTargetsTasks = 0;
 	public int numberOfDroneRobots = 0;
 	
-	public static int minTargetLimit = 20;
-	public static int maxTargetLimit = 30;
-	public static int minDroneLimit = 10;
-	public static int maxDroneLimit = 15;
+	public static int[] targetRange = {10, 20};
+	public static int[] droneRange = {5, 10};
+	
+	public static int minTargetLimit = targetRange[0];
+	public static int maxTargetLimit = targetRange[1];
+	public static int minDroneLimit = droneRange[0];
+	public static int maxDroneLimit = droneRange[1];
 	
 	private double SAFE_RANGE = 2.0;
 	
@@ -86,8 +89,6 @@ public class TaskPlane extends SimState {
 	public SparseGrid2D targetDrones;
 	
 	private List<DroneRobot> drones;
-	
-	public Map<TargetTask, DroneRobot> taskRobotAssignmentMap;
 	
 	public List<Integer> priorityArray = new ArrayList<>();
 	public List<Integer> completedArray = new ArrayList<>();
@@ -108,14 +109,13 @@ public class TaskPlane extends SimState {
 	
 	PrintStream stream = null;
 	
-	DecimalFormat df = new DecimalFormat("##.00");
-	
-	private double targetFieldCoverPercentage = 0.0;
+	public static double targetFieldCoverPercentage = 0.0;
 
 	public TaskPlane(long seed) {
 		super(seed);
 		
 		FileLogger.setPrintStreamAsFile(FileLogger.getLogFileName(this.METHOD.name()), SHOULD_LOG_IN_FILE);
+		FileLogger.summaryOnly = false;
 		
 		// initialize program start time
 		programmeStartTimeStamp = System.nanoTime();
@@ -138,7 +138,7 @@ public class TaskPlane extends SimState {
 		
 		trialNumber += 1;
 		
-		FileLogger.println("I="+(++trialNumber)+" DR ["+minDroneLimit+"-"+maxDroneLimit+"] TR ["+minTargetLimit+"-"+maxTargetLimit+"] ");
+		FileLogger.println("I="+(trialNumber)+" DR ["+minDroneLimit+"-"+maxDroneLimit+"] TR ["+minTargetLimit+"-"+maxTargetLimit+"] ");
 		
 		try {
 			// initial phase
@@ -149,7 +149,7 @@ public class TaskPlane extends SimState {
 			this.calculateStatusAssessments();
 			
 			// third stage
-			taskRobotAssignmentMap = this.announceEstimates();
+			this.announceEstimates();
 			
 			// fourth stage
 			this.signInContracts();
@@ -180,10 +180,11 @@ public class TaskPlane extends SimState {
 
 			double KT_1 = Math.abs(new KendallsCorrelation().correlation(tmpDoublePriorityArray, tmpDoubleCompletedArray));
 			
-			double topK = maxTargetLimit * 0.6 ;
-			double KT_2 = Common.calculateKendallsCorrelation(priorityArray, completedArray, topK);
+			double topK = maxTargetLimit * 1 ;
+			//double KT_2 = Common.calculateKendallsCorrelationTopK(priorityArray, completedArray, topK);
+			double KT_2 = Common.calculateKendallsCorrelation(priorityArray, completedArray);
 			double PC_1 = Math.abs(new PearsonsCorrelation().correlation(tmpDoublePriorityArray, tmpDoubleCompletedArray));
-			double simulationDuration = (simulationEndTime - simulationStartTime)/1000000;
+			double simulationDuration = schedule.getTime();// (simulationEndTime - simulationStartTime)/1000000;
 			
 			sumNonModifiedKT += KT_1;
 			sumKLengthListKT += KT_2;
@@ -192,7 +193,7 @@ public class TaskPlane extends SimState {
 			
 			targetFieldCoverPercentage  = ((double)totalNumberOfCompletedTaskCount * 100.0)/(double)totalNumberOfPossibleTasks;
 			
-			FileLogger.println("----------- Trial ("+trialNumber+") ------------");
+			FileLogger.printlnSum("----------- Trial ("+trialNumber+") ------------");
 			
 			printList(priorityArray, "Expected Order Of Tasks: ");
 			printList(completedArray, "Completed Order Of Tasks: ");
@@ -200,18 +201,17 @@ public class TaskPlane extends SimState {
 			FileLogger.println("Simulation Duration= "+ simulationDuration + " ms ");
 			FileLogger.println("L2 Distance= "+ meanIndexError);
 			
-			FileLogger.println("KenDalls Tau = "+ df.format(KT_1));
-			FileLogger.println("KenDalls Tau Error (Top K length lists)= "+ df.format(KT_2));
-			FileLogger.println("Pearson's Correlation= "+ df.format(PC_1));
-			FileLogger.println("Mean Simulation Time= "+(sumSimulationDurations/trialNumber) + "S");
-			FileLogger.println("Target Field Cover Percentage= "+new DecimalFormat("##.##").format(targetFieldCoverPercentage)+"%");
+			FileLogger.println("KenDalls Tau = "+ KT_1);
+			FileLogger.println("KenDalls Tau Error (Top K length lists)= "+ KT_2);
+			FileLogger.println("Pearson's Correlation= "+ PC_1);
+			FileLogger.println("Target Field Cover Percentage= "+targetFieldCoverPercentage+"%");
 			
 			if (targetFieldCoverPercentage > MAXIMUM_TARGET_FIELD_COVERAGE_PERCENTAGE) {
 				
 				StringBuilder summeryMessage = new StringBuilder("\n");
 				summeryMessage.append("-------------------------- Summary ----------------------\n");
+				summeryMessage.append("Method"+ METHOD.name());
 				summeryMessage.append("Total Number of Drones: ");
-				summeryMessage.append(drones.size());
 				summeryMessage.append(" ["+minDroneLimit+"-"+maxDroneLimit+"]");
 				summeryMessage.append('\n');
 				summeryMessage.append("Target Tasks Allocation Range For One Simulation: ");
@@ -225,15 +225,15 @@ public class TaskPlane extends SimState {
 				summeryMessage.append('\n');
 				
 				summeryMessage.append("Mean KenDalls Tau for "+ trialNumber +" Trials : ");
-				summeryMessage.append(sumNonModifiedKT/trialNumber);
+				summeryMessage.append(sumNonModifiedKT/(double)trialNumber);
 				summeryMessage.append('\n');
 				
 				summeryMessage.append("Mean KenDalls Tau Error (Top K length lists) for "+ trialNumber +" Trials : ");
-				summeryMessage.append(sumKLengthListKT/trialNumber);
+				summeryMessage.append(sumKLengthListKT/(double)trialNumber);
 				summeryMessage.append('\n');
 				
 				summeryMessage.append("Mean Pearson's correlation for "+ trialNumber +" Trials : ");
-				summeryMessage.append(sumPearsonssCorrelations/trialNumber);
+				summeryMessage.append(sumPearsonssCorrelations/(double)trialNumber);
 				summeryMessage.append('\n');
 				
 				summeryMessage.append("Mean Simulation Execution Time for "+ trialNumber +" Trials : ");
@@ -241,8 +241,10 @@ public class TaskPlane extends SimState {
 				summeryMessage.append('\n');
 				
 				summeryMessage.append("Mean STD for "+ trialNumber +" Trials : ");
-				summeryMessage.append(sumStdValues/trialNumber);
+				summeryMessage.append(sumStdValues/(double)trialNumber);
 				summeryMessage.append('\n');
+				
+				FileLogger.printlnSum(summeryMessage.toString());
 				
 				if(SHOW_NUMBER_OF_ITERATION_CHART) {
 					ChartEva.showPercentChart(alreadyFoundTargetsList.stream().mapToInt(i->i).toArray(), "Search iterations for finding unassigned locations");
@@ -256,13 +258,19 @@ public class TaskPlane extends SimState {
 				
 			}
 			
+			System.gc();
+			
 			if(isPermittedToRunSimulationContineously) {
 				this.targetDrones.clear();
 				if(!KEEP_PAST_TRAILS_ON_THE_SIMULATION_WINDOW) {
 					this.targetTasks.clear();
 					this.trails.setTo(new DoubleGrid2D(TASK_PLANE_AREA_WIDTH, TASK_PLANE_AREA_HEIGHT));
 				}
+				schedule.clear();
+				schedule.reset();
 				this.startTaskSharing();
+			}else {
+				this.kill();
 			}
 		}
 	}
@@ -356,28 +364,26 @@ public class TaskPlane extends SimState {
 		simulationStartTime = System.nanoTime();
 	}
 	
-	private Map<TargetTask, DroneRobot> announceEstimates() throws CloneNotSupportedException{
+	private void announceEstimates() throws CloneNotSupportedException{
 		if(METHOD == SharingMethods.GÜREL) {
-			return announceEstimatesGurelsMethod();
+			announceEstimatesGurelsMethod();
 		} 
 		else if(METHOD == SharingMethods.OUR_NP) {
-			return announceEstimatesOurMethodWithoutIdle();
+			announceEstimatesOurMethodWithoutIdle();
 		} 
 		else {
-			return announceEstimatesOurMethod();
+			announceEstimatesOurMethod();
 		}
 	}
 
-	private Map<TargetTask, DroneRobot> announceEstimatesOurMethod() throws CloneNotSupportedException {
+	private void announceEstimatesOurMethod() throws CloneNotSupportedException {
 		
 		Bag tmpTargetTasks = (Bag) this.targetTasks.getAllObjects().clone();
 		List<DroneRobot> tmpDrones = new ArrayList<>();
 		tmpDrones.addAll(this.drones);
 		
 		boolean []idleRobotMetrix = null;
-		
-		Map<TargetTask, DroneRobot> targetTaskRobotAssignements = new HashMap<>();
-		
+	
 		FileLogger.println("Assigning Tasks To Robots ----");
 		while(!tmpTargetTasks.isEmpty()) {
 			
@@ -394,22 +400,17 @@ public class TaskPlane extends SimState {
 			
 			if(selectedDroneRobot != null) {
 				tmpDrones.get(selectedDroneRobot.getId() -1).addTaskToTargetTaskList(nextTask);
-				targetTaskRobotAssignements.put(nextTask, selectedDroneRobot);
 				idleRobotMetrix[selectedDroneRobot.getId() -1] = true;
 			}
 		}
 		
-		return targetTaskRobotAssignements;
-		
 	}
 	
-	private Map<TargetTask, DroneRobot> announceEstimatesOurMethodWithoutIdle() throws CloneNotSupportedException {
+	private void announceEstimatesOurMethodWithoutIdle() throws CloneNotSupportedException {
 		
 		Bag tmpTargetTasks = (Bag) this.targetTasks.getAllObjects().clone();
 		List<DroneRobot> tmpDrones = new ArrayList<>();
 		tmpDrones.addAll(this.drones);
-		
-		Map<TargetTask, DroneRobot> targetTaskRobotAssignements = new HashMap<>();
 		
 		FileLogger.println("Assigning Tasks To Robots ----");
 		while(!tmpTargetTasks.isEmpty()) {
@@ -442,21 +443,16 @@ public class TaskPlane extends SimState {
 			
 			if(selectedDrone != null) {
 				tmpDrones.get(selectedDrone.getId() -1).addTaskToTargetTaskList(nextTask);
-				targetTaskRobotAssignements.put(nextTask, selectedDrone);
 			}
 		}
 		
-		return targetTaskRobotAssignements;
-		
 	}
 	
-	private Map<TargetTask, DroneRobot> announceEstimatesGurelsMethod() throws CloneNotSupportedException {
+	private void announceEstimatesGurelsMethod() throws CloneNotSupportedException {
 		
 		Bag tmpTargetTasks = (Bag) this.targetTasks.getAllObjects().clone();
 		List<DroneRobot> tmpDrones = new ArrayList<>();
 		tmpDrones.addAll(this.drones);
-		
-		Map<TargetTask, DroneRobot> targetTaskRobotAssignements = new HashMap<>();
 		
 		FileLogger.println("Assigning Tasks To Robots ----");
 
@@ -493,11 +489,8 @@ public class TaskPlane extends SimState {
 			
 			if(selectedDrone != null) {
 				tmpDrones.get(selectedDrone.getId() -1).addTaskToTargetTaskList(nextTask);
-				targetTaskRobotAssignements.put(nextTask, selectedDrone);
 			}
 		}
-		
-		return targetTaskRobotAssignements;
 		
 	}
 	
@@ -505,6 +498,7 @@ public class TaskPlane extends SimState {
 	private DroneRobot assignRobot(TargetTask inputTargetTask, List<DroneRobot> inputDronesList, boolean[] inputIdleRobotMetrix) {
 		
 		DroneRobot tempSelectedDroneRobot = null;
+		
 		List<DroneRobot> tmpDroneList= new ArrayList<>();
 		
 		// get Idle robots
@@ -519,13 +513,13 @@ public class TaskPlane extends SimState {
 		}
 		
 		for (DroneRobot tempDroneRobot : inputDronesList) {
-			Assessment tmpAssessment = tempDroneRobot.getTotalAssessmentToNextTarget(inputTargetTask);
+			Assessment tmpAssessment = tempDroneRobot.getTotalAssessmentWithoutReturnTrip(inputTargetTask);
 			
 			if(inputIdleRobotMetrix[tempDroneRobot.getId() -1] == true) {
 				continue;
 			}else if(tempSelectedDroneRobot == null && tmpAssessment.isWinBid()) {
 				tempSelectedDroneRobot = tempDroneRobot;
-			} else if(tmpAssessment.isWinBid() && tempSelectedDroneRobot.getTotalAssessmentToNextTarget(inputTargetTask).compare(tmpAssessment)) {
+			} else if(tmpAssessment.isWinBid() && tempSelectedDroneRobot.getTotalAssessmentWithoutReturnTrip(inputTargetTask).compare(tmpAssessment)) {
 				tempSelectedDroneRobot = tempDroneRobot;
 			}else {
 				continue;
@@ -718,21 +712,15 @@ public class TaskPlane extends SimState {
 	}
 	
 	private void printList(List<Integer> priorityArray2, String title) {
-		StringBuilder sb = new StringBuilder();
-		sb.append(title);
-		for (int id : priorityArray2) {
-			sb.append(id);
-			sb.append(",");
-		}
-		sb.append("END");
-		FileLogger.println(sb.toString());
+		FileLogger.println(title +" ["+Arrays.toString(priorityArray2.toArray())+"]");
 	}
 	
 	// end VF
 	
-//	public static void main(String[] args) {
-//		doLoop(TaskPlane.class, args);
-//		System.exit(0);
-//	}
+	public static void main(String[] args) {
+		
+		doLoop(TaskPlane.class, args);
+		System.exit(0);
+	}
 
 }
