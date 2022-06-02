@@ -28,7 +28,7 @@ public class Common {
 		return startPosition + (steps * spaceBetweenTwoLocations);
 	}
 
-	public static double calculateKendallsCorrelation(List<Integer> arr1, List<Integer> arr2, double k) {
+	public static double calculateKendallsCorrelationTopK(List<Integer> arr1, List<Integer> arr2, double k) {
 		
 		int cc=0;
 		
@@ -47,6 +47,27 @@ public class Common {
 		
 		double kt = Math.abs((double)(cc)/k);
 		return kt;
+	}
+	
+	public static double calculateKendallsCorrelation(List<Integer> arr1, List<Integer> arr2) {
+		
+		double cc=0, dc =0;
+		
+		for(int i=0; i< arr1.size(); i++) {
+			for(int j= i; j < arr2.size(); j++) {
+				if(arr2.get(j) <= arr2.get(i)) {
+					
+					int a = i - arr1.indexOf(arr2.get(j));
+					int b = arr2.indexOf(arr1.get(i)) - j;
+					
+					if(a * b < 0)
+						dc++;
+					else 
+						cc++;
+				}
+			}
+		}
+		return Math.abs((cc - dc)/(cc+dc));
 	}
 	
 	public static double getGurelControlParameter() {

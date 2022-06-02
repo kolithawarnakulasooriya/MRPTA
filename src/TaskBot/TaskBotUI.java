@@ -9,8 +9,8 @@ import javax.swing.*;
 
 public class TaskBotUI extends GUIState {
 
-	private static final double DISPLAY_WIDTH = 400;
-	private static final double DISPLAY_HEIGHT = 400;
+	private static final double DISPLAY_WIDTH = 800;
+	private static final double DISPLAY_HEIGHT = 800;
 	
 	public Display2D display;
     public JFrame displayFrame;
@@ -34,7 +34,7 @@ public class TaskBotUI extends GUIState {
 	    
 	    displayFrame = display.createFrame();
 	    c.registerFrame(displayFrame);  
-	   // displayFrame.setVisible(true);
+	    //displayFrame.setVisible(true);
 	    displayFrame.setTitle(getName());
 	    display.setBackdrop(Color.white);
 	    display.attach(trailsPortrayal,"Trails");
