@@ -41,3 +41,5 @@ Harith Kolitha Warnakulasooriya
 
 [mason-image]: https://img.shields.io/badge/dynamic/xml?color=green&label=mason&query=20&url=https%3A%2F%2Fcs.gmu.edu%2F~eclab%2Fprojects%2Fmason%2F
 [mason-url]: https://cs.gmu.edu/~eclab/projects/mason/
+
+Publication: Published this work on AAAI-2023 - WoMAPF 
