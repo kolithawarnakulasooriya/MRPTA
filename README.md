@@ -2,7 +2,7 @@
 
 This project is about a seminar based research project called priority based task allocation. Here we simulated a solution for the priority based multi agent task allocation (MRTA) for drone swarms in  multi agent based platform. 
 
-**Publication: Published this work on AAAI-2023 - WoMAPF**
+**Publication: Published this work in AAAI-2023 - WoMAPF**
 
 <img src="https://github.com/HarithKK/MRPTA/blob/master/Image.png" height="400">
 
