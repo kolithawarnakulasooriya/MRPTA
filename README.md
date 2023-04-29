@@ -34,8 +34,9 @@ commons-math3-3.6.1.jar
 4. `java mainRunner`
 
 ## Contributors
-
 Harith Kolitha Warnakulasooriya
+Aviv Segev
+Ryne Benton
 
 
 [java-image]: https://img.shields.io/badge/dynamic/xml?color=red&label=java&query=1.8&url=https%3A%2F%2Fopenjdk.java.net%2Fprojects%2Fjdk8%2F
